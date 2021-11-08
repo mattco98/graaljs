@@ -308,6 +308,9 @@ def run_javascript_basictests(js_binary):
 
     return mx.run([js_binary, '--js.intl-402'] + testfiles, nonZeroIsFatal=True)
 
+def jdk_has_module_support():
+    return get_jdk().javaCompliance > mx.JavaCompliance('1.8')
+
 mx_sdk.register_graalvm_component(mx_sdk.GraalVmLanguage(
     suite=_suite,
     name='Graal.js',
@@ -328,6 +331,8 @@ mx_sdk.register_graalvm_component(mx_sdk.GraalVmLanguage(
     ],
     launcher_configs=[
         mx_sdk.LanguageLauncherConfig(
+            use_modules='image' if jdk_has_module_support() else None,
+            main_module="org.graalvm.js.launcher",
             destination='bin/<exe:js>',
             jar_distributions=['graal-js:GRAALJS_LAUNCHER'],
             main_class='com.oracle.truffle.js.shell.JSLauncher',
