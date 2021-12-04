@@ -51,6 +51,7 @@ import com.oracle.truffle.api.object.DynamicObjectLibrary;
 import com.oracle.truffle.api.object.HiddenKey;
 import com.oracle.truffle.js.nodes.JavaScriptNode;
 import com.oracle.truffle.js.nodes.access.IsObjectNode;
+import com.oracle.truffle.js.nodes.decorators.PrivateName;
 import com.oracle.truffle.js.runtime.Errors;
 
 import java.util.Set;
@@ -65,8 +66,8 @@ public abstract class PrivateFieldInNode extends JSBinaryNode {
     }
 
     @Specialization(guards = {"isJSObject(haystack)"}, limit = "3")
-    protected boolean doInstance(HiddenKey needle, DynamicObject haystack, @CachedLibrary("haystack") DynamicObjectLibrary access) {
-        return access.containsKey(haystack, needle);
+    protected boolean doInstance(PrivateName needle, DynamicObject haystack, @CachedLibrary("haystack") DynamicObjectLibrary access) {
+        return access.containsKey(haystack, needle.getHiddenKey());
     }
 
     @Specialization(guards = {"isJSObject(haystack)"})
