@@ -231,7 +231,13 @@ public enum TokenType {
     SPREAD_OBJECT  (IR,           null),
     YIELD_STAR     (IR,           null),
     ASSIGN_INIT    (IR,           null),
-    NAMEDEVALUATION(IR,           null);
+    NAMEDEVALUATION(IR,           null),
+
+    //Decorator Proposal tokens
+    //TODO: Associate with the correct ECMAScript Version
+    //TODO: Change to KEYWORD if better suited
+    AT             (UNARY, "@", 0, true, 13);
+
     //@formatter:on
 
     /** Next token kind in token lookup table. */
