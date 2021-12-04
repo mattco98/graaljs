@@ -73,7 +73,7 @@ public final class ProxyFunctionBuiltins extends JSBuiltinsContainer.Lambda {
 
     protected ProxyFunctionBuiltins() {
         super(JSProxy.CLASS_NAME);
-        defineFunction("revocable", 2, (context, builtin) -> RevocableNodeGen.create(context, builtin, args().fixedArgs(2).createArgumentNodes(context)));
+        defineFunction("revocable", 2, (context, builtin) -> ProxyFunctionBuiltinsFactory.RevocableNodeGen.create(context, builtin, args().fixedArgs(2).createArgumentNodes(context)));
     }
 
     public abstract static class RevocableNode extends JSBuiltinNode {
@@ -85,7 +85,7 @@ public final class ProxyFunctionBuiltins extends JSBuiltinsContainer.Lambda {
 
         public RevocableNode(JSContext context, JSBuiltin builtin) {
             super(context, builtin);
-            this.proxyCreateNode = ConstructJSProxyNodeGen.create(context, builtin, false, null);
+            this.proxyCreateNode = ConstructorBuiltinsFactory.ConstructJSProxyNodeGen.create(context, builtin, false, null);
             this.setRevocableProxySlotNode = PropertySetNode.createSetHidden(JSProxy.REVOCABLE_PROXY, context);
             this.createObjectNode = CreateObjectNode.create(context);
             this.createProxyPropertyNode = CreateDataPropertyNode.create(context, "proxy");

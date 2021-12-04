@@ -248,9 +248,8 @@ public final class ClassDefinitionNode extends JavaScriptNode implements Functio
             return executeWithDecorators(frame, constructor, proto);
         } else {
             executeWithoutDecorators(frame, constructor, proto);
+            return constructor;
         }
-
-        return constructor;
     }
 
     private void executeWithoutDecorators(VirtualFrame frame, DynamicObject constructor, DynamicObject proto) {

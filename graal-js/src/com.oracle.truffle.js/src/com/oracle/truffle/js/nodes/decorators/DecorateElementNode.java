@@ -39,7 +39,7 @@ public class DecorateElementNode extends JavaScriptBaseNode {
                 errorBranch.enter();
                 throw Errors.createTypeErrorElementDescriptorProperty("kind", "must not have value 'hook'.", this);
             }
-            Object elementObject = ElementDescriptorUtil.fromElementDescriptor(element, context);
+            Object elementObject = ElementDescriptorUtil.fromElementDescriptor(context, getRealm(), element);
             Object decoratedObject = decoratorCallNode.executeCall(JSArguments.createOneArg(Undefined.instance, decorator, elementObject));
             if (decoratedObject == Undefined.instance) {
                 decoratedObject = elementObject;

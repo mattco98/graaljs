@@ -102,7 +102,7 @@ public class DefineMethodNode extends JavaScriptBaseNode {
         }
 
         public static FunctionCreateNode create(JSContext context, JSFunctionData functionData, int blockScopeSlot) {
-            return FunctionCreateNodeGen.create(context, functionData, blockScopeSlot);
+            return DefineMethodNodeFactory.FunctionCreateNodeGen.create(context, functionData, blockScopeSlot);
         }
 
         public abstract DynamicObject executeWithPrototype(VirtualFrame frame, Object prototype);

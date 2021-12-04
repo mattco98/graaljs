@@ -5,6 +5,7 @@ import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.js.runtime.Errors;
 import com.oracle.truffle.js.runtime.JSContext;
+import com.oracle.truffle.js.runtime.JSRealm;
 import com.oracle.truffle.js.runtime.JSRuntime;
 import com.oracle.truffle.js.runtime.Symbol;
 import com.oracle.truffle.js.runtime.builtins.JSOrdinary;
@@ -34,8 +35,8 @@ public class ElementDescriptorUtil {
     private static final String EXTRAS = "extras";
 
     @TruffleBoundary
-    public static Object fromElementDescriptor(ElementDescriptor element, JSContext context) {
-        DynamicObject obj = JSOrdinary.create(context);
+    public static Object fromElementDescriptor(JSContext context, JSRealm realm, ElementDescriptor element) {
+        DynamicObject obj = JSOrdinary.create(context, realm);
         PropertyDescriptor desc = PropertyDescriptor.createData(ELEMENT_DESCRIPTOR_VALUE,false, false, true);
         JSRuntime.definePropertyOrThrow(obj,Symbol.SYMBOL_TO_STRING_TAG,desc);
         JSRuntime.createDataPropertyOrThrow(obj, KIND, element.getKindString());
@@ -265,20 +266,20 @@ public class ElementDescriptorUtil {
     }
 
     @TruffleBoundary
-    public static Object fromClassDescriptor(ClassElementList elements, JSContext context) {
+    public static Object fromClassDescriptor(JSContext context, JSRealm realm, ClassElementList elements) {
         Object[] elementObjects = new Object[elements.size()];
         int i = 0;
         for (ElementDescriptor element: elements.getOwnElements()){
-            elementObjects[i++] = fromElementDescriptor(element,context);
+            elementObjects[i++] = fromElementDescriptor(context, realm, element);
         }
         for(ElementDescriptor element: elements.getStaticAndPrototypeElements()) {
-            elementObjects[i++] = fromElementDescriptor(element,context);
+            elementObjects[i++] = fromElementDescriptor(context, realm, element);
         }
-        DynamicObject obj = JSOrdinary.create(context);
+        DynamicObject obj = JSOrdinary.create(context, realm);
         PropertyDescriptor desc = PropertyDescriptor.createData(ELEMENT_DESCRIPTOR_VALUE,false,false,true);
         JSRuntime.definePropertyOrThrow(obj, Symbol.SYMBOL_TO_STRING_TAG, desc);
         JSRuntime.createDataPropertyOrThrow(obj, KIND, CLASS);
-        JSRuntime.createDataPropertyOrThrow(obj, ELEMENTS, JSRuntime.createArrayFromList(context, Arrays.asList(elementObjects.clone())));
+        JSRuntime.createDataPropertyOrThrow(obj, ELEMENTS, JSRuntime.createArrayFromList(context, realm, Arrays.asList(elementObjects.clone())));
         return obj;
     }
 
