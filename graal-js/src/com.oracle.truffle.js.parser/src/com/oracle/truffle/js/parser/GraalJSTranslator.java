@@ -63,6 +63,7 @@ import com.oracle.js.parser.ir.BlockStatement;
 import com.oracle.js.parser.ir.CallNode;
 import com.oracle.js.parser.ir.CaseNode;
 import com.oracle.js.parser.ir.CatchNode;
+import com.oracle.js.parser.ir.ClassElement;
 import com.oracle.js.parser.ir.ClassNode;
 import com.oracle.js.parser.ir.DebuggerNode;
 import com.oracle.js.parser.ir.Expression;
@@ -143,6 +144,8 @@ import com.oracle.truffle.js.nodes.control.ReturnTargetNode;
 import com.oracle.truffle.js.nodes.control.SequenceNode;
 import com.oracle.truffle.js.nodes.control.StatementNode;
 import com.oracle.truffle.js.nodes.control.SuspendNode;
+import com.oracle.truffle.js.nodes.decorators.ClassElementKeyNode;
+import com.oracle.truffle.js.nodes.decorators.ClassElementNode;
 import com.oracle.truffle.js.nodes.function.AbstractFunctionArgumentsNode;
 import com.oracle.truffle.js.nodes.function.BlockScopeNode;
 import com.oracle.truffle.js.nodes.function.EvalNode;
@@ -3048,7 +3051,7 @@ abstract class GraalJSTranslator extends com.oracle.js.parser.ir.visitor.Transla
         } else if (property.isPrivate()) {
             VarRef privateVar = environment.findLocalVar(property.getPrivateName());
             if (property.isClassField()) {
-                JSWriteFrameSlotNode writePrivateNode = (JSWriteFrameSlotNode) privateVar.createWriteNode(factory.createNewPrivateName(property.getPrivateName()));
+                JSWriteFrameSlotNode writePrivateNode = (JSWriteFrameSlotNode) privateVar.createWriteNode(factory.createNewPrivateName(property.getPrivateName(), context));
                 return factory.createPrivateFieldMember(privateVar.createReadNode(), property.isStatic(), value, writePrivateNode);
             } else {
                 JSWriteFrameSlotNode writePrivateNode = (JSWriteFrameSlotNode) privateVar.createWriteNode(null);
@@ -3426,15 +3429,32 @@ abstract class GraalJSTranslator extends com.oracle.js.parser.ir.visitor.Transla
 
             JavaScriptNode classDefinition;
             try (EnvironmentCloseable privateEnv = enterPrivateEnvironment(classNode)) {
-                JavaScriptNode classFunction = transform(classNode.getConstructor().getValue());
-
-                ArrayList<ObjectLiteralMemberNode> members = transformPropertyDefinitionList(classNode.getClassElements(), true, classNameSymbol);
-
                 JSWriteFrameSlotNode writeClassBinding = className == null ? null : (JSWriteFrameSlotNode) findScopeVar(className, true).createWriteNode(null);
 
-                classDefinition = factory.createClassDefinition(context, (JSFunctionExpressionNode) classFunction, classHeritage,
-                                members.toArray(ObjectLiteralMemberNode.EMPTY), writeClassBinding, className,
-                                classNode.getInstanceFieldCount(), classNode.getStaticElementCount(), classNode.hasPrivateInstanceMethods(), currentFunction().getBlockScopeSlot());
+                // TODO: Check some sort of usesAncestorScope like line 354?
+                JSFrameSlot blockScopeSlot = environment != null ? environment.getCurrentBlockScopeSlot() : null;
+
+                if(!context.areDecoratorsEnabled()){
+                    JavaScriptNode classFunction = transform(classNode.getConstructor().getValue());
+                    ArrayList<ObjectLiteralMemberNode> members = transformPropertyDefinitionList(classNode.getClassElements(), true, classNameSymbol);
+                    classDefinition = factory.createClassDefinition(context, (JSFunctionExpressionNode) classFunction, classHeritage,
+                            members.toArray(ObjectLiteralMemberNode.EMPTY), writeClassBinding, className, classNode.getInstanceFieldCount(), classNode.getStaticElementCount(), classNode.hasPrivateInstanceMethods(), blockScopeSlot);
+                } else {
+                    JavaScriptNode classFunction = transform(classNode.getDecoratorConstructor().getValue());
+                    List<ClassElementNode> members = transformClassElementDefinitionList(classNode.getDecoratorClassElements(), classNameSymbol);
+
+                    JavaScriptNode[] classDecorators = new JavaScriptNode[0];
+
+                    if(classNode.getDecorators() != null && classNode.getDecorators().size() != 0) {
+                        List<Expression> d = classNode.getDecorators();
+                        classDecorators = new JavaScriptNode[d.size()];
+                        for(int i = 0; i < d.size(); i++) {
+                            classDecorators[d.size() - i - 1] = transform(d.get(i));
+                        }
+                    }
+                    classDefinition = factory.createDecoratorClassDefinition(context, (JSFunctionExpressionNode) classFunction, classHeritage,
+                            members.toArray(ClassElementNode.EMPTY), writeClassBinding, className, classDecorators, blockScopeSlot);
+                }
 
                 if (classNode.hasPrivateMethods()) {
                     // internal constructor binding used for private brand checks.
@@ -3451,6 +3471,50 @@ abstract class GraalJSTranslator extends com.oracle.js.parser.ir.visitor.Transla
             return new EnvironmentCloseable(new PrivateEnvironment(environment, factory, context));
         }
         return null;
+    }
+
+    private List<ClassElementNode> transformClassElementDefinitionList(List<ClassElement> elementDefinitions, Symbol classNameSymbol){
+        List<ClassElementNode> elements = new ArrayList<>(elementDefinitions.size());
+        for(int i = 0; i < elementDefinitions.size(); i++){
+            ClassElement e = elementDefinitions.get(i);
+            ClassElementNode member;
+            final ClassElementKeyNode key;
+            if(e.hasComputedKey()) {
+                key = factory.createComputedKeyNode(transform(e.getKey()));
+            } else if(e.isPrivate()){
+                VarRef privateVar = environment.findLocalVar(e.getPrivateName());
+                JSWriteFrameSlotNode writePrivateNode = (JSWriteFrameSlotNode) privateVar.createWriteNode(factory.createNewPrivateName(e.getPrivateName(), context));
+                key = factory.createPrivateKeyNode(privateVar.createReadNode(), writePrivateNode);
+            } else {
+                key = factory.createPropertyKeyNode(e.getKeyName());
+            }
+
+            JavaScriptNode[] decorators = null;
+            if(e.getDecorators() != null) {
+                List<Expression> d = e.getDecorators();
+                decorators =  new JavaScriptNode[d.size()];
+                for(int j = 0; j < d.size(); j++) {
+                    decorators[d.size() - j - 1] = transform(d.get(j));
+                }
+            }
+
+            if(e.isField() || e.isMethod()){
+                JavaScriptNode value = transformPropertyValue(e.getValue(), classNameSymbol);
+                if(e.isField()) {
+                    member = factory.createFieldClassElement(key, value, e.isStatic(), e.isPrivate(), e.isAnonymousFunctionDefinition(), decorators);
+                } else {
+                    member = factory.createMethodClassElement(key, value, e.isStatic(), e.isPrivate(), decorators);
+                }
+            } else {
+                assert e.isAccessor();
+                assert e.getGetter() != null || e.getSetter() != null;
+                JavaScriptNode getter = getAccessor(e.getGetter());
+                JavaScriptNode setter = getAccessor(e.getSetter());
+                member = factory.createAccessorClassElement(key, getter, setter,e.isStatic(), e.isPrivate(), decorators);
+            }
+            elements.add(member);
+        }
+        return elements;
     }
 
     @Override

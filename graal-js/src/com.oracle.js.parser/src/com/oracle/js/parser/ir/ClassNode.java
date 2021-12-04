@@ -63,6 +63,11 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
 
     public static final String PRIVATE_CONSTRUCTOR_BINDING_NAME = "#constructor";
 
+    //Decorator proposal
+    private final ClassElement decoratorConstructor;
+    private final List<ClassElement> decoratorClassElements;
+    private final List<Expression> decorators;
+
     /**
      * Constructor.
      *
@@ -75,7 +80,6 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
         this.ident = ident;
         this.classHeritage = classHeritage;
         this.constructor = constructor;
-        this.classElements = classElements;
         this.scope = scope;
         this.instanceFieldCount = instanceFieldCount;
         this.staticElementCount = staticElementCount;
@@ -83,19 +87,43 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
         this.hasPrivateInstanceMethods = hasPrivateInstanceMethods;
         assert instanceFieldCount == elementCount(classElements, false);
         assert staticElementCount == elementCount(classElements, true);
+        this.classElements = classElements;
+        this.decoratorConstructor = null;
+        this.decoratorClassElements = null;
+        this.decorators = null;
     }
 
-    private ClassNode(final ClassNode classNode, final IdentNode ident, final Expression classHeritage, final PropertyNode constructor, final List<PropertyNode> classElements) {
+    public ClassNode(final long token, final int finish, final IdentNode ident, final Expression classHeritage, final ClassElement constructor, final List<ClassElement> classElements, final List<Expression> decorators,
+                     final Scope scope, boolean hasPrivateMethods) {
+        super(token, finish);
+        this.ident = ident;
+        this.classHeritage = classHeritage;
+        this.constructor = null;
+        this.scope = scope;
+        this.instanceFieldCount = 1; //Needed for initializeInstanceElements to be called.
+        this.staticElementCount = 0;
+        this.hasPrivateMethods = hasPrivateMethods;
+        this.hasPrivateInstanceMethods = false;
+        this.classElements = null;
+        this.decoratorConstructor = constructor;
+        this.decoratorClassElements = classElements;
+        this.decorators = decorators;
+    }
+
+    private ClassNode(final ClassNode classNode, final IdentNode ident, final Expression classHeritage, final PropertyNode constructor, final List<PropertyNode> classElements, final ClassElement decoratorConstructor, final List<ClassElement> decoratorClassElements, final List<Expression> decorators) {
         super(classNode);
         this.ident = ident;
         this.classHeritage = classHeritage;
         this.constructor = constructor;
         this.classElements = classElements;
         this.scope = classNode.scope;
-        this.instanceFieldCount = elementCount(classElements, false);
-        this.staticElementCount = elementCount(classElements, true);
+        this.instanceFieldCount = classElements != null ? elementCount(classElements, false) : 1;
+        this.staticElementCount = classElements != null ? elementCount(classElements, true) : 1;
         this.hasPrivateMethods = classNode.hasPrivateMethods;
         this.hasPrivateInstanceMethods = classNode.hasPrivateInstanceMethods;
+        this.decoratorConstructor = decoratorConstructor;
+        this.decoratorClassElements = decoratorClassElements;
+        this.decorators = decorators;
     }
 
     private static int elementCount(List<PropertyNode> classElements, boolean isStatic) {
@@ -119,7 +147,7 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
         if (this.ident == ident) {
             return this;
         }
-        return new ClassNode(this, ident, classHeritage, constructor, classElements);
+        return new ClassNode(this, ident, classHeritage, constructor, classElements, decoratorConstructor, decoratorClassElements, decorators);
     }
 
     /**
@@ -133,7 +161,7 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
         if (this.classHeritage == classHeritage) {
             return this;
         }
-        return new ClassNode(this, ident, classHeritage, constructor, classElements);
+        return new ClassNode(this, ident, classHeritage, constructor, classElements, decoratorConstructor, decoratorClassElements, decorators);
     }
 
     /**
@@ -147,21 +175,58 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
         if (this.constructor == constructor) {
             return this;
         }
-        return new ClassNode(this, ident, classHeritage, constructor, classElements);
+        return new ClassNode(this, ident, classHeritage, constructor, classElements, decoratorConstructor, decoratorClassElements, decorators);
     }
 
     /**
      * Get method definitions except the constructor.
      */
     public List<PropertyNode> getClassElements() {
-        return Collections.unmodifiableList(classElements);
+        if (classElements != null) {
+            return Collections.unmodifiableList(classElements);
+        }
+        return null;
     }
 
     public ClassNode setClassElements(final List<PropertyNode> classElements) {
         if (this.classElements == classElements) {
             return this;
         }
-        return new ClassNode(this, ident, classHeritage, constructor, classElements);
+        return new ClassNode(this, ident, classHeritage, constructor, classElements, decoratorConstructor, decoratorClassElements, decorators);
+    }
+
+    public ClassElement getDecoratorConstructor() {
+        return this.decoratorConstructor;
+    }
+
+    public ClassNode setDecoratorConstructor(final ClassElement decoratorConstructor) {
+        if (this.decoratorConstructor == decoratorConstructor) {
+            return this;
+        }
+        return new ClassNode(this, ident, classHeritage, constructor, classElements, decoratorConstructor, decoratorClassElements, decorators);
+    }
+
+    public List<ClassElement> getDecoratorClassElements() {
+        if(decoratorClassElements != null) {
+            return Collections.unmodifiableList(decoratorClassElements);
+        }
+        return null;
+    }
+
+    public ClassNode setDecoratorClassElements(final List<ClassElement> decoratorClassElements) {
+        if(this.decoratorClassElements == decoratorClassElements) {
+            return this;
+        }
+        return new ClassNode(this, ident, classHeritage, constructor,classElements, decoratorConstructor ,decoratorClassElements, decorators);
+    }
+
+    public List<Expression> getDecorators() { return decorators; }
+
+    public ClassNode setDecorators(final List<Expression> decorators) {
+        if(this.decorators == decorators) {
+            return this;
+        }
+        return new ClassNode(this, ident, classHeritage,constructor, classElements, decoratorConstructor,decoratorClassElements, decorators);
     }
 
     @Override
@@ -170,8 +235,17 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
             IdentNode newIdent = ident == null ? null : (IdentNode) ident.accept(visitor);
             Expression newClassHeritage = classHeritage == null ? null : (Expression) classHeritage.accept(visitor);
             PropertyNode newConstructor = constructor == null ? null : (PropertyNode) constructor.accept(visitor);
-            List<PropertyNode> newClassElements = Node.accept(visitor, classElements);
-            return visitor.leaveClassNode(setIdent(newIdent).setClassHeritage(newClassHeritage).setConstructor(newConstructor).setClassElements(newClassElements));
+            ClassElement newDecoratorConstructor = decoratorConstructor == null ? null : (ClassElement) decoratorConstructor.accept(visitor);
+            List<PropertyNode> newClassElements = classElements == null ? null : Node.accept(visitor, classElements);
+            List<ClassElement> newDecoratorClassElements = decoratorClassElements == null ? null : Node.accept(visitor, decoratorClassElements);
+            List<Expression> newDecorators = decorators == null ? null : Node.accept(visitor, decorators);
+            return visitor.leaveClassNode(setIdent(newIdent)
+                    .setClassHeritage(newClassHeritage)
+                    .setConstructor(newConstructor)
+                    .setDecoratorConstructor(newDecoratorConstructor)
+                    .setDecoratorClassElements(newDecoratorClassElements)
+                    .setClassElements(newClassElements)
+                    .setDecorators(newDecorators));
         }
 
         return this;
@@ -217,6 +291,13 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
 
     @Override
     public void toString(StringBuilder sb, boolean printType) {
+        if(decorators != null) {
+            for (Expression decorator : decorators) {
+                sb.append("@");
+                decorator.toString(sb, printType);
+                sb.append(" ");
+            }
+        }
         sb.append("class");
         if (ident != null) {
             sb.append(' ');
@@ -230,9 +311,20 @@ public class ClassNode extends LexicalContextExpression implements LexicalContex
         if (constructor != null) {
             constructor.toString(sb, printType);
         }
-        for (PropertyNode classElement : getClassElements()) {
-            sb.append(", ");
-            classElement.toString(sb, printType);
+        if (decoratorConstructor != null) {
+            decoratorConstructor.toString(sb, printType);
+        }
+        if(getClassElements() != null) {
+            for (PropertyNode classElement : getClassElements()) {
+                sb.append(", ");
+                classElement.toString(sb, printType);
+            }
+        }
+        if(getDecoratorClassElements() != null) {
+            for(ClassElement classElement : getDecoratorClassElements()) {
+                sb.append(", ");
+                classElement.toString(sb, printType);
+            }
         }
         sb.append("}");
     }
