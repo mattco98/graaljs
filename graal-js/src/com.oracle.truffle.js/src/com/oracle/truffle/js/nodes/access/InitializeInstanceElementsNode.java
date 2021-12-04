@@ -50,14 +50,21 @@ import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.instrumentation.Tag;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.ExplodeLoop.LoopExplosionKind;
+import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.object.HiddenKey;
+import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.js.nodes.JavaScriptBaseNode;
 import com.oracle.truffle.js.nodes.JavaScriptNode;
+import com.oracle.truffle.js.nodes.decorators.ClassElementList;
+import com.oracle.truffle.js.nodes.decorators.ElementDescriptor;
+import com.oracle.truffle.js.nodes.decorators.PrivateName;
 import com.oracle.truffle.js.nodes.function.JSFunctionCallNode;
+import com.oracle.truffle.js.runtime.Errors;
 import com.oracle.truffle.js.runtime.JSArguments;
 import com.oracle.truffle.js.runtime.JSContext;
 import com.oracle.truffle.js.runtime.JSRuntime;
 import com.oracle.truffle.js.runtime.builtins.JSFunction;
+import com.oracle.truffle.js.runtime.objects.PropertyDescriptor;
 import com.oracle.truffle.js.runtime.objects.Undefined;
 
 /**
@@ -85,6 +92,8 @@ public abstract class InitializeInstanceElementsNode extends JavaScriptNode {
     @Child @Executed protected JavaScriptNode constructorNode;
     @Child @Executed(with = "constructorNode") protected JSTargetableNode fieldsNode;
     @Child @Executed(with = "constructorNode") protected JSTargetableNode brandNode;
+    @Child @Executed(with = "constructorNode") protected JSTargetableNode elementsNode;
+
     protected final JSContext context;
 
     protected InitializeInstanceElementsNode(JSContext context, JavaScriptNode targetNode, JavaScriptNode constructorNode) {
@@ -93,6 +102,7 @@ public abstract class InitializeInstanceElementsNode extends JavaScriptNode {
         this.constructorNode = constructorNode;
         if (constructorNode != null) {
             this.fieldsNode = PropertyNode.createGetHidden(context, null, JSFunction.CLASS_FIELDS_ID);
+            this.elementsNode = PropertyNode.createGetHidden(context, null, JSFunction.ELEMENTS_ID);
             this.brandNode = PropertyNode.createGetHidden(context, null, JSFunction.PRIVATE_BRAND_ID);
         }
     }
@@ -105,18 +115,63 @@ public abstract class InitializeInstanceElementsNode extends JavaScriptNode {
         return InitializeInstanceElementsNodeGen.create(context, null, null);
     }
 
-    public final Object executeStaticElements(Object targetConstructor, Object[][] staticElements) {
-        return executeEvaluated(targetConstructor, Undefined.instance, staticElements, Undefined.instance);
+    public final Object executeFields(Object proto, Object constructor, ElementDescriptor[] fields) {
+        return executeEvaluated(proto, constructor, fields, Undefined.instance, null);
     }
 
-    protected abstract Object executeEvaluated(Object target, Object constructor, Object[][] fields, Object brand);
+    public final Object executeStaticElements(Object targetConstructor, Object[][] staticElements) {
+        return executeEvaluated(targetConstructor, Undefined.instance, staticElements, Undefined.instance, null);
+    }
+
+    protected abstract Object executeEvaluated(Object target, Object constructor, Object fields, Object brand, ClassElementList elements);
 
     @ExplodeLoop(kind = LoopExplosionKind.FULL_UNROLL)
     @Specialization
-    protected static Object withFields(Object target, Object constructor, Object[][] fields, Object brand,
+    protected static Object withStaticAndPrototypeField(Object target, Object constructor, ElementDescriptor[] fields, Object brand, Object elements,
+                                                        @Cached("createStaticAndPrototypeFieldNodes(fields, context)") DefineFieldNode[] fieldNodes) {
+        int i = 0;
+        for(ElementDescriptor element: fields) {
+            if(element.isField()) {
+                Object receiver = element.isStatic() ? constructor : target;
+                fieldNodes[i++].defineDecoratorField(receiver, element);
+            }
+        }
+        return target;
+    }
+    @ExplodeLoop(kind = LoopExplosionKind.FULL_UNROLL)
+    @Specialization
+    protected static Object withOwnFields(Object target, Object constructor, Object fields, Object brand, ClassElementList elements,
+                                          @Cached("createBrandAddNode(brand, context)") @Shared("privateBrandAdd") PrivateFieldAddNode privateBrandAddNode,
+                                          @Cached("createOwnFieldNodes(elements, context)") DefineFieldNode[] fieldNodes, @Cached("createStartHookNodes(elements)") ExecuteStartHookNode[] startHookNodes) {
+        if(elements.setInstanceBand()) {
+            privateBrandAdd(target, constructor, fields, brand, elements, privateBrandAddNode);
+        }
+
+        int fieldIndex = 0;
+        int startHookIndex = 0;
+        for (ElementDescriptor element: elements.getOwnElements()) {
+            if((element.isMethod() || element.isAccessor()) && JSRuntime.isPropertyKey(element.getKey())) {
+                JSRuntime.definePropertyOrThrow((DynamicObject) target, element.getKey(), element.getDescriptor());
+            }
+        }
+        for(ElementDescriptor element: elements.getOwnElements()) {
+            if (element.isField()) {
+                fieldNodes[fieldIndex++].defineDecoratorField(target, element);
+            }
+            if (element.isHook()) {
+                startHookNodes[startHookIndex++].execute(target, element);
+            }
+        }
+        return target;
+    }
+
+
+    @ExplodeLoop(kind = LoopExplosionKind.FULL_UNROLL)
+    @Specialization
+    protected static Object withFields(Object target, Object constructor, Object[][] fields, Object brand, Object elements,
                     @Cached("createBrandAddNode(brand, context)") @Shared("privateBrandAdd") PrivateFieldAddNode privateBrandAddNode,
                     @Cached("createFieldNodes(fields, context)") DefineFieldNode[] fieldNodes) {
-        privateBrandAdd(target, constructor, fields, brand, privateBrandAddNode);
+        privateBrandAdd(target, constructor, fields, brand, elements, privateBrandAddNode);
 
         int size = fieldNodes.length;
         assert size == fields.length;
@@ -130,7 +185,7 @@ public abstract class InitializeInstanceElementsNode extends JavaScriptNode {
     }
 
     @Specialization
-    protected static Object privateBrandAdd(Object target, Object constructor, @SuppressWarnings("unused") Object fields, Object brand,
+    protected static Object privateBrandAdd(Object target, Object constructor, @SuppressWarnings("unused") Object fields, Object brand, Object elements,
                     @Cached("createBrandAddNode(brand, context)") @Shared("privateBrandAdd") PrivateFieldAddNode privateBrandAddNode) {
         // If constructor.[[PrivateBrand]] is not undefined,
         // Perform ? PrivateBrandAdd(O, constructor.[[PrivateBrand]]).
@@ -179,6 +234,53 @@ public abstract class InitializeInstanceElementsNode extends JavaScriptNode {
         return fieldNodes;
     }
 
+    static DefineFieldNode[] createOwnFieldNodes(ClassElementList elements, JSContext context) {
+        CompilerAsserts.neverPartOfCompilation();
+        int size = elements.getOwnFieldCount();
+        return createDecoratorFieldNodes(elements.getOwnElementsArray(), context, size);
+    }
+
+    static DefineFieldNode[] createStaticAndPrototypeFieldNodes(ElementDescriptor[] elements, JSContext context) {
+        CompilerAsserts.neverPartOfCompilation();
+        return createDecoratorFieldNodes(elements, context, elements.length);
+    }
+
+    static DefineFieldNode[] createDecoratorFieldNodes(ElementDescriptor[] elements, JSContext context, int size) {
+        CompilerAsserts.neverPartOfCompilation();
+        DefineFieldNode[] fieldNodes = new DefineFieldNode[size];
+        int fieldNodeCount = 0;
+        for(ElementDescriptor element : elements) {
+            if(element.isField()) {
+                Object key = element.getKey();
+                Object initializer = element.getInitialize();
+                JavaScriptBaseNode writeNode = null;
+                if (key instanceof PrivateName) {
+                    writeNode = PrivateFieldAddNode.create(context);
+                }
+                JSFunctionCallNode callNode = null;
+                if (initializer != Undefined.instance) {
+                    callNode = JSFunctionCallNode.createCall();
+                }
+                fieldNodes[fieldNodeCount++] = new DefineFieldNode(writeNode, callNode, false);
+            }
+        }
+        return fieldNodes;
+    }
+
+    static ExecuteStartHookNode[] createStartHookNodes(ClassElementList elements) {
+        CompilerAsserts.neverPartOfCompilation();
+        int size = elements.getOwnHookStartCount();
+        ExecuteStartHookNode[] startHookNodes = new ExecuteStartHookNode[size];
+        int i = 0;
+        for(ElementDescriptor element: elements.getOwnElements()) {
+            if(element.isHook()) {
+                assert element.hasStart();
+                startHookNodes[i++] = new ExecuteStartHookNode();
+            }
+        }
+        return startHookNodes;
+    }
+
     static final class DefineFieldNode extends JavaScriptBaseNode {
         @Child JavaScriptBaseNode writeNode;
         @Child JSFunctionCallNode callNode;
@@ -202,6 +304,42 @@ public abstract class InitializeInstanceElementsNode extends JavaScriptNode {
             } else if (writeNode != null) {
                 assert JSRuntime.isPropertyKey(key) : key;
                 ((WriteElementNode) writeNode).executeWithTargetAndIndexAndValue(target, key, value);
+            }
+        }
+
+        void defineDecoratorField(Object target, ElementDescriptor desc) {
+            Object key = desc.getKey();
+            Object initValue = Undefined.instance;
+            if(callNode != null && desc.hasInitialize()) {
+                initValue = callNode.executeCall(JSArguments.createZeroArg(target, desc.getInitialize()));
+            }
+            PropertyDescriptor dataDescriptor = desc.getDescriptor();
+            assert dataDescriptor.isDataDescriptor();
+            dataDescriptor.setValue(initValue);
+            if(writeNode instanceof PrivateFieldAddNode) {
+                assert key instanceof PrivateName : key;
+                ((PrivateFieldAddNode) writeNode).execute(target, ((PrivateName) key).getHiddenKey(), initValue);
+            } else {
+                assert JSRuntime.isPropertyKey(key) : key;
+                JSRuntime.definePropertyOrThrow((DynamicObject) target, key, dataDescriptor);
+            }
+        }
+    }
+
+    static final class ExecuteStartHookNode extends JavaScriptBaseNode {
+        private final BranchProfile errorBranch = BranchProfile.create();
+        @Child JSFunctionCallNode callNode;
+
+        ExecuteStartHookNode() {
+            callNode = JSFunctionCallNode.createCall();
+        }
+
+        void execute(Object target, ElementDescriptor desc) {
+            assert desc.hasStart();
+            Object res = callNode.executeCall(JSArguments.createZeroArg(target, desc.getStart()));
+            if(res != Undefined.instance) {
+                errorBranch.enter();
+                throw Errors.createTypeErrorHookReturnValue("Start",this);
             }
         }
     }

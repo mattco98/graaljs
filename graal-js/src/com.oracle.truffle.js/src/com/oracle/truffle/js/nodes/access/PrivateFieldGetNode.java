@@ -56,6 +56,7 @@ import com.oracle.truffle.api.object.HiddenKey;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.js.nodes.JavaScriptNode;
 import com.oracle.truffle.js.nodes.ReadNode;
+import com.oracle.truffle.js.nodes.decorators.PrivateName;
 import com.oracle.truffle.js.nodes.function.JSFunctionCallNode;
 import com.oracle.truffle.js.runtime.Errors;
 import com.oracle.truffle.js.runtime.JSArguments;
@@ -109,6 +110,27 @@ public abstract class PrivateFieldGetNode extends JSTargetableNode implements Re
             throw Errors.createTypeErrorCannotGetAccessorProperty(keyAsString(), target, this);
         }
         return callNode.executeCall(JSArguments.createZeroArg(target, getter));
+    }
+
+    @Specialization(guards = {"isJSObject(target)"}, limit = "3")
+    Object doPrivateName(DynamicObject target, PrivateName key, @CachedLibrary("target") DynamicObjectLibrary access, @Cached("createCall()") JSFunctionCallNode callNode , @Cached BranchProfile errorBranch) {
+        if(key.isField()) {
+            return doField(target, key.getHiddenKey(), access, errorBranch);
+        }else if(key.isMethod()) {
+            if(key.getDescriptor().getWritable() && access.containsKey(target, key.getHiddenKey())) {
+                return access.getOrDefault(target, key.getHiddenKey(), Undefined.instance);
+            }
+            return key.getDescriptor().getValue();
+        } else if(key.isAccessor()) {
+            if(!key.getDescriptor().hasGet()) {
+                errorBranch.enter();
+                throw Errors.createTypeError(String.format("Accessor %s has no getter.", key.getName()), this);
+            }
+            return callNode.executeCall(JSArguments.createZeroArg(target, key.getDescriptor().getGet()));
+        } else {
+            errorBranch.enter();
+            return missing(target, key);
+        }
     }
 
     @TruffleBoundary

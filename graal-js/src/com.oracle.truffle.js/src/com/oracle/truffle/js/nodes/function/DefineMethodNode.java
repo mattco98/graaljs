@@ -48,7 +48,6 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.js.nodes.JavaScriptBaseNode;
 import com.oracle.truffle.js.nodes.access.PropertySetNode;
-import com.oracle.truffle.js.nodes.function.DefineMethodNodeFactory.FunctionCreateNodeGen;
 import com.oracle.truffle.js.runtime.Errors;
 import com.oracle.truffle.js.runtime.JSContext;
 import com.oracle.truffle.js.runtime.JSFrameUtil;
@@ -86,7 +85,7 @@ public class DefineMethodNode extends JavaScriptBaseNode {
         return closure;
     }
 
-    int getBlockScopeSlot() {
+    public int getBlockScopeSlot() {
         return functionCreateNode.blockScopeSlot;
     }
 

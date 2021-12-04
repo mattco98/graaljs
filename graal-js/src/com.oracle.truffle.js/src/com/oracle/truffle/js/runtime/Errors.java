@@ -856,6 +856,57 @@ public final class Errors {
         return createTypeError(String.format("Duplicate private member %s.", name), originatingNode);
     }
 
+    //ElementDescriptor Type Errors
+    @TruffleBoundary
+    public static JSException createTypeErrorElementDescriptorProperty(String name, String expected, Node originatingNode) {
+        return createTypeError(String.format("Element descriptor property %s %s.", name, expected), originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorElementDescriptorRestriction(String condition, String restriction, Node originatingNode) {
+        return createTypeError(String.format("Element descriptor with %s %s.", condition, restriction), originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorElementDescriptorPropertyRestriction(String name, String condition, String expected, Node originatingNode) {
+        return createTypeError(String.format("Element descriptor property %s with value %s %s.", name, condition, expected), originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorElementDescriptorPropertyDescriptor(String condition, String restriction, Node originatingNode) {
+        return createTypeError(String.format("Property descriptor of element descriptor with %s %s.", condition, restriction), originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorPropertyDescriptor(String name, String restriction, Node originatingNode) {
+        return createTypeError(String.format("Property %s of property descriptor %s.", name, restriction), originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorMethodDecorators(Node originatingNode) {
+        return createTypeError("Overwritten and overwriting methods can not be decorated.", originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorAccessorDecorators(Node originatingNode) {
+        return createTypeError("Either getter or setter can be decorated, not both.", originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorHookReturnValue(String name, Node originatingNode) {
+        return createTypeError(String.format("%s of hook can not have a return value.", name), originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorHookReplaceValue(Node originatingNode) {
+        return createTypeError("Replace of hook must return a constructor.", originatingNode);
+    }
+
+    @TruffleBoundary
+    public static JSException createTypeErrorClassDescriptor(String name, Node originatingNode) {
+        return createTypeError(String.format("Class descriptor must not have property %s.", name), originatingNode);
+    }
+
     @TruffleBoundary
     public static JSException createTypeError(Throwable cause, Node originatingNode) {
         return JSException.create(JSErrorType.TypeError, cause.getMessage(), cause, originatingNode);

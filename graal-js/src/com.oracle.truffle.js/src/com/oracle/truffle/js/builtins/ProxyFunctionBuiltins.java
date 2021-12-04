@@ -45,8 +45,6 @@ import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.js.builtins.ConstructorBuiltins.ConstructJSProxyNode;
-import com.oracle.truffle.js.builtins.ConstructorBuiltinsFactory.ConstructJSProxyNodeGen;
-import com.oracle.truffle.js.builtins.ProxyFunctionBuiltinsFactory.RevocableNodeGen;
 import com.oracle.truffle.js.nodes.access.CreateDataPropertyNode;
 import com.oracle.truffle.js.nodes.access.CreateObjectNode;
 import com.oracle.truffle.js.nodes.access.PropertyGetNode;

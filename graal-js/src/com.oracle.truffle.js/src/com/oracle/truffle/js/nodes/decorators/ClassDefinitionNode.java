@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-package com.oracle.truffle.js.nodes.function;
+package com.oracle.truffle.js.nodes.decorators;
 
 import java.util.Set;
 
@@ -57,6 +57,11 @@ import com.oracle.truffle.js.nodes.access.JSWriteFrameSlotNode;
 import com.oracle.truffle.js.nodes.access.ObjectLiteralNode.ObjectLiteralMemberNode;
 import com.oracle.truffle.js.nodes.access.PropertyGetNode;
 import com.oracle.truffle.js.nodes.access.PropertySetNode;
+import com.oracle.truffle.js.nodes.function.CreateMethodPropertyNode;
+import com.oracle.truffle.js.nodes.function.DefineMethodNode;
+import com.oracle.truffle.js.nodes.function.FunctionNameHolder;
+import com.oracle.truffle.js.nodes.function.JSFunctionExpressionNode;
+import com.oracle.truffle.js.nodes.function.SetFunctionNameNode;
 import com.oracle.truffle.js.nodes.unary.IsConstructorNode;
 import com.oracle.truffle.js.runtime.Errors;
 import com.oracle.truffle.js.runtime.JSContext;
@@ -70,53 +75,121 @@ import com.oracle.truffle.js.runtime.objects.Null;
  * ES6 14.5.14 Runtime Semantics: ClassDefinitionEvaluation.
  */
 public final class ClassDefinitionNode extends JavaScriptNode implements FunctionNameHolder {
-
     private final JSContext context;
-    @Child private JavaScriptNode constructorFunctionNode;
-    @Child private JavaScriptNode classHeritageNode;
-    @Children private final ObjectLiteralMemberNode[] memberNodes;
-
-    @Child private JSWriteFrameSlotNode writeClassBindingNode;
-    @Child private PropertyGetNode getPrototypeNode;
-    @Child private CreateMethodPropertyNode setConstructorNode;
-    @Child private CreateObjectNode.CreateObjectWithPrototypeNode createPrototypeNode;
-    @Child private DefineMethodNode defineConstructorMethodNode;
-    @Child private PropertySetNode setFieldsNode;
-    @Child private InitializeInstanceElementsNode staticElementsNode;
-    @Child private PropertySetNode setPrivateBrandNode;
-    @Child private SetFunctionNameNode setFunctionName;
-    @Child private IsConstructorNode isConstructorNode;
-    private final BranchProfile errorBranch = BranchProfile.create();
-
     private final boolean hasName;
     private final int instanceFieldCount;
     private final int staticElementCount;
 
+    //Constructor
+    @Child private JavaScriptNode constructorFunctionNode;
+    @Child private DefineMethodNode defineConstructorMethodNode;
+    @Child private CreateMethodPropertyNode setConstructorNode;
+
+    //Prototype
+    @Child private PropertyGetNode getPrototypeNode;
+    @Child private CreateObjectNode.CreateObjectWithPrototypeNode createPrototypeNode;
+
+    //Definition
+    @Child private JavaScriptNode classHeritageNode;
+    @Child private JSWriteFrameSlotNode writeClassBindingNode;
+    @Child private SetFunctionNameNode setFunctionName;
+    @Child private IsConstructorNode isConstructorNode;
+    private final BranchProfile errorBranch = BranchProfile.create();
+
+    //Class Members
+    @Children private final ObjectLiteralMemberNode[] memberNodes;
+
+    //Initialisation
+    @Child private PropertySetNode setFieldsNode;
+    @Child private InitializeInstanceElementsNode staticElementsNode;
+    @Child private PropertySetNode setPrivateBrandNode;
+
+    //Decorator Class Element Handling
+
+    @Child private PropertySetNode setElementsNode;
+    @Child private EvaluateClassElementsNode evaluateClassElementsNode;
+    @Child private InitializeClassElementsNode initializeClassElementsNode;
+
+    //Decorator Handling
+    @Child private DecorateClassNode decorateClassNode;
+
     protected ClassDefinitionNode(JSContext context, JSFunctionExpressionNode constructorFunctionNode, JavaScriptNode classHeritageNode, ObjectLiteralMemberNode[] memberNodes,
-                    JSWriteFrameSlotNode writeClassBindingNode, boolean hasName, int instanceFieldCount, int staticElementCount, boolean hasPrivateInstanceMethods, int blockScopeSlot) {
+                                  JSWriteFrameSlotNode writeClassBindingNode, boolean hasName, int instanceFieldCount, int staticElementCount, boolean hasPrivateInstanceMethods, ClassElementNode[] classElementNodes, JavaScriptNode[] decoratorNodes, int blockScopeSlot) {
         this.context = context;
-        this.constructorFunctionNode = constructorFunctionNode;
-        this.classHeritageNode = classHeritageNode;
-        this.memberNodes = memberNodes;
         this.hasName = hasName;
         this.instanceFieldCount = instanceFieldCount;
         this.staticElementCount = staticElementCount;
 
-        this.writeClassBindingNode = writeClassBindingNode;
-        this.getPrototypeNode = PropertyGetNode.create(JSObject.PROTOTYPE, false, context);
+        this.constructorFunctionNode = constructorFunctionNode;
         this.setConstructorNode = CreateMethodPropertyNode.create(context, JSObject.CONSTRUCTOR);
-        this.createPrototypeNode = CreateObjectNode.createOrdinaryWithPrototype(context);
         this.defineConstructorMethodNode = DefineMethodNode.create(context, constructorFunctionNode, blockScopeSlot);
+
+        this.getPrototypeNode = PropertyGetNode.create(JSObject.PROTOTYPE, false, context);
+        this.createPrototypeNode = CreateObjectNode.createOrdinaryWithPrototype(context);
+
+        this.classHeritageNode = classHeritageNode;
+        this.writeClassBindingNode = writeClassBindingNode;
+        this.setFunctionName = hasName ? null : SetFunctionNameNode.create();
+
+        this.memberNodes = memberNodes;
+
         this.setFieldsNode = instanceFieldCount != 0 ? PropertySetNode.createSetHidden(JSFunction.CLASS_FIELDS_ID, context) : null;
         this.setPrivateBrandNode = hasPrivateInstanceMethods ? PropertySetNode.createSetHidden(JSFunction.PRIVATE_BRAND_ID, context) : null;
-        this.setFunctionName = hasName ? null : SetFunctionNameNode.create();
+
         this.isConstructorNode = IsConstructorNode.create();
+        this.constructorFunctionNode = constructorFunctionNode;
+
+        if (context.areDecoratorsEnabled()) {
+            this.setElementsNode = PropertySetNode.createSetHidden(JSFunction.ELEMENTS_ID, context);
+            this.evaluateClassElementsNode = EvaluateClassElementsNode.create(context, classElementNodes);
+            this.initializeClassElementsNode = InitializeClassElementsNode.create(context);
+            this.decorateClassNode = DecorateClassNode.create(context, decoratorNodes);
+        } else {
+            this.setElementsNode = null;
+            this.evaluateClassElementsNode = null;
+            this.initializeClassElementsNode = null;
+            this.decorateClassNode = null;
+        }
+    }
+
+    private ClassDefinitionNode(JSContext context, JSFunctionExpressionNode constructorFunctionNode, JavaScriptNode classHeritageNode, JSWriteFrameSlotNode writeClassBindingNode, DecorateClassNode decoratorNode, boolean hasName, EvaluateClassElementsNode evaluateClassElementsNode, int blockScopeSlot) {
+        this.context = context;
+        this.hasName = hasName;
+        this.instanceFieldCount = 0;
+        this.staticElementCount = 0;
+
+        this.isConstructorNode = IsConstructorNode.create();
+        this.constructorFunctionNode = constructorFunctionNode;
+        this.setConstructorNode = CreateMethodPropertyNode.create(context, JSObject.CONSTRUCTOR);
+        this.defineConstructorMethodNode = DefineMethodNode.create(context, constructorFunctionNode, blockScopeSlot);
+
+        this.getPrototypeNode = PropertyGetNode.create(JSObject.PROTOTYPE, false, context);
+        this.createPrototypeNode = CreateObjectNode.createOrdinaryWithPrototype(context);
+
+        this.classHeritageNode = classHeritageNode;
+        this.writeClassBindingNode = writeClassBindingNode;
+        this.setFunctionName = hasName ? null : SetFunctionNameNode.create();
+
+        this.memberNodes = null;
+
+        this.setFieldsNode = null;
+        this.setPrivateBrandNode = null;
+
+        this.setElementsNode = PropertySetNode.createSetHidden(JSFunction.ELEMENTS_ID, context);
+        this.evaluateClassElementsNode = evaluateClassElementsNode;
+        this.initializeClassElementsNode = InitializeClassElementsNode.create(context);
+
+        this.decorateClassNode = decoratorNode;
     }
 
     public static ClassDefinitionNode create(JSContext context, JSFunctionExpressionNode constructorFunction, JavaScriptNode classHeritage, ObjectLiteralMemberNode[] members,
                     JSWriteFrameSlotNode writeClassBinding, boolean hasName, int instanceFieldCount, int staticFieldCount, boolean hasPrivateInstanceMethods, JSFrameSlot blockScopeSlot) {
         return new ClassDefinitionNode(context, constructorFunction, classHeritage, members, writeClassBinding, hasName, instanceFieldCount, staticFieldCount, hasPrivateInstanceMethods,
-                        blockScopeSlot != null ? blockScopeSlot.getIndex() : -1);
+                        null, null, blockScopeSlot != null ? blockScopeSlot.getIndex() : -1);
+    }
+
+    public static ClassDefinitionNode createDecoratorClassDefinitionNode(JSContext context, JSFunctionExpressionNode constructorFunctionNode, JavaScriptNode classHeritage, JSWriteFrameSlotNode writeClassBindingNode, ClassElementNode[] classElementNodes, JavaScriptNode[] classDecorators, boolean hasName, JSFrameSlot blockScopeSlot) {
+        return new ClassDefinitionNode(context, constructorFunctionNode, classHeritage, null, writeClassBindingNode, hasName, 0, 0, false, classElementNodes, classDecorators, blockScopeSlot != null ? blockScopeSlot.getIndex() : -1);
     }
 
     @Override
@@ -171,6 +244,18 @@ public final class ClassDefinitionNode extends JavaScriptNode implements Functio
         // Perform CreateMethodProperty(proto, "constructor", F).
         setConstructorNode.executeVoid(proto, constructor);
 
+        if(context.areDecoratorsEnabled()) {
+            return executeWithDecorators(frame, constructor, proto);
+        } else {
+            executeWithoutDecorators(frame, constructor, proto);
+        }
+
+        return constructor;
+    }
+
+    private void executeWithoutDecorators(VirtualFrame frame, DynamicObject constructor, DynamicObject proto) {
+        //Non-decorator Class Initialization
+
         Object[][] instanceFields = instanceFieldCount == 0 ? null : new Object[instanceFieldCount][];
         Object[][] staticElements = staticElementCount == 0 ? null : new Object[staticElementCount][];
 
@@ -198,7 +283,32 @@ public final class ClassDefinitionNode extends JavaScriptNode implements Functio
             }
             initializeStaticElements.executeStaticElements(constructor, staticElements);
         }
+    }
 
+    private DynamicObject executeWithDecorators(VirtualFrame frame,DynamicObject constructor, DynamicObject proto) {
+        //Decorator Class Initialization
+
+        //ClassElementEvaluation
+        //CoalesceClassElements
+        ElementDescriptor[] elements = evaluateClassElementsNode.execute(frame, proto, constructor);
+
+        if(writeClassBindingNode != null) {
+            writeClassBindingNode.executeWrite(frame, constructor);
+        }
+
+        //DecorateClass
+        ClassElementList classElements = decorateClassNode.executeElementDecoration(elements);
+        classElements = decorateClassNode.executeClassDecoration(frame, classElements);
+
+        //AssignPrivatNames
+        assignPrivateNames(classElements);
+
+        //InitializeClassElements
+        constructor = initializeClassElementsNode.execute(proto, constructor, classElements);
+
+        //Only elements with kind "own" get pushed to the initialization.
+        classElements.removeStaticAndPrototypeElements();
+        setElementsNode.setValue(constructor, classElements);
         return constructor;
     }
 
@@ -226,6 +336,25 @@ public final class ClassDefinitionNode extends JavaScriptNode implements Functio
         assert instanceFieldIndex == instanceFieldCount && staticElementIndex == staticElementCount;
     }
 
+    private void assignPrivateNames(ClassElementList elements) {
+        for (ElementDescriptor element : elements.getOwnElements()) {
+            assignPrivateName(element);
+        }
+        for(ElementDescriptor element: elements.getStaticAndPrototypeElements()) {
+            assignPrivateName(element);
+        }
+    }
+
+    private void assignPrivateName(ElementDescriptor element) {
+        if(element.hasKey() && element.hasPrivateKey()) {
+            PrivateName key = element.getPrivateKey();
+            if(element.isField() || element.isMethod() || element.isAccessor()) {
+                key.setKind(element.getKind());
+            }
+            key.setDescriptor(element.getDescriptor());
+        }
+    }
+
     @Override
     public boolean isResultAlwaysOfType(Class<?> clazz) {
         return clazz == DynamicObject.class;
@@ -243,9 +372,13 @@ public final class ClassDefinitionNode extends JavaScriptNode implements Functio
 
     @Override
     protected JavaScriptNode copyUninitialized(Set<Class<? extends Tag>> materializedTags) {
-        return new ClassDefinitionNode(context, (JSFunctionExpressionNode) cloneUninitialized(constructorFunctionNode, materializedTags), cloneUninitialized(classHeritageNode, materializedTags),
-                        ObjectLiteralMemberNode.cloneUninitialized(memberNodes, materializedTags),
-                        cloneUninitialized(writeClassBindingNode, materializedTags), hasName, instanceFieldCount, staticElementCount, setPrivateBrandNode != null,
-                        defineConstructorMethodNode.getBlockScopeSlot());
+        if(!context.areDecoratorsEnabled()) {
+            return create(context, (JSFunctionExpressionNode) cloneUninitialized(constructorFunctionNode, materializedTags), cloneUninitialized(classHeritageNode, materializedTags),
+                    ObjectLiteralMemberNode.cloneUninitialized(memberNodes, materializedTags),
+                    cloneUninitialized(writeClassBindingNode, materializedTags), hasName, instanceFieldCount, staticElementCount, setPrivateBrandNode != null, null);
+        } else {
+            return new ClassDefinitionNode(context, (JSFunctionExpressionNode) cloneUninitialized(constructorFunctionNode, materializedTags), cloneUninitialized(classHeritageNode, materializedTags),
+                    cloneUninitialized(writeClassBindingNode, materializedTags), DecorateClassNode.cloneUninitialized(decorateClassNode, materializedTags), hasName, EvaluateClassElementsNode.cloneUninitialized(evaluateClassElementsNode, materializedTags), defineConstructorMethodNode.getBlockScopeSlot());
+        }
     }
 }

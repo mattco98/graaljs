@@ -1744,4 +1744,6 @@ public class JSContext {
     public static String getTypeImportAssertion() {
         return TYPE_IMPORT_ASSERTION;
     }
+
+    public boolean areDecoratorsEnabled() { return getEcmaScriptVersion() > 12; }
 }

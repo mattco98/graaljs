@@ -187,10 +187,12 @@ import com.oracle.truffle.js.nodes.control.VoidBlockNode;
 import com.oracle.truffle.js.nodes.control.WhileNode;
 import com.oracle.truffle.js.nodes.control.WithNode;
 import com.oracle.truffle.js.nodes.control.YieldNode;
+import com.oracle.truffle.js.nodes.decorators.ClassElementKeyNode;
+import com.oracle.truffle.js.nodes.decorators.ClassElementNode;
 import com.oracle.truffle.js.nodes.function.AbstractBodyNode;
 import com.oracle.truffle.js.nodes.function.BlockScopeNode;
 import com.oracle.truffle.js.nodes.function.CallApplyArgumentsNode;
-import com.oracle.truffle.js.nodes.function.ClassDefinitionNode;
+import com.oracle.truffle.js.nodes.decorators.ClassDefinitionNode;
 import com.oracle.truffle.js.nodes.function.ConstructorResultNode;
 import com.oracle.truffle.js.nodes.function.ConstructorRootNode;
 import com.oracle.truffle.js.nodes.function.DefaultDerivedConstructorSuperCallNode;
@@ -835,9 +837,14 @@ public class NodeFactory {
     }
 
     public JavaScriptNode createClassDefinition(JSContext context, JSFunctionExpressionNode constructorFunction, JavaScriptNode classHeritage, ObjectLiteralMemberNode[] members,
-                    JSWriteFrameSlotNode writeClassBinding, String className, int instanceFieldCount, int staticFieldCount, boolean hasPrivateInstanceMethods, JSFrameSlot blockScopeSlot) {
+                                                JSWriteFrameSlotNode writeClassBinding, String className, int instanceFieldCount, int staticFieldCount, boolean hasPrivateInstanceMethods, JSFrameSlot blockScopeSlot) {
         return ClassDefinitionNode.create(context, constructorFunction, classHeritage, members,
                         writeClassBinding, className != null, instanceFieldCount, staticFieldCount, hasPrivateInstanceMethods, blockScopeSlot);
+    }
+
+    public JavaScriptNode createDecoratorClassDefinition(JSContext context, JSFunctionExpressionNode constructorFunction, JavaScriptNode classHeritage, ClassElementNode[] classElementNodes,
+                                                         JSWriteFrameSlotNode writeClassBinding, String className, JavaScriptNode[] decorators, JSFrameSlot blockScopeSlot) {
+        return ClassDefinitionNode.createDecoratorClassDefinitionNode(context, constructorFunction, classHeritage, writeClassBinding, classElementNodes, decorators, className != null, blockScopeSlot);
     }
 
     public JavaScriptNode createMakeMethod(JSContext context, JavaScriptNode function) {
@@ -1156,8 +1163,8 @@ public class NodeFactory {
         return InitializeInstanceElementsNode.create(context, target, constructor);
     }
 
-    public JavaScriptNode createNewPrivateName(String description) {
-        return NewPrivateNameNode.create(description);
+    public JavaScriptNode createNewPrivateName(String description, JSContext context) {
+        return NewPrivateNameNode.create(description, context);
     }
 
     public JavaScriptNode createPrivateFieldGet(JSContext context, JavaScriptNode target, JavaScriptNode key) {
@@ -1232,5 +1239,29 @@ public class NodeFactory {
 
     public static NodeFactory getInstance(JSContext context) {
         return (NodeFactory) context.getNodeFactory();
+    }
+
+    public ClassElementKeyNode createComputedKeyNode(JavaScriptNode key) {
+        return ClassElementKeyNode.createComputedKeyNode(key);
+    }
+
+    public ClassElementKeyNode createPrivateKeyNode(JavaScriptNode key, JSWriteFrameSlotNode writePrivateNode) {
+        return ClassElementKeyNode.createPrivateKeyNode(key, writePrivateNode);
+    }
+
+    public ClassElementKeyNode createPropertyKeyNode(Object key) {
+        return ClassElementKeyNode.createObjectKeyNode(key);
+    }
+
+    public ClassElementNode createFieldClassElement(ClassElementKeyNode key, JavaScriptNode initialize, boolean isStatic, boolean isPrivate, boolean isAnonymousFunctionDefinition, JavaScriptNode[] decorators) {
+        return ClassElementNode.createFieldClassElement(key, initialize, isStatic, isPrivate, isAnonymousFunctionDefinition, decorators);
+    }
+
+    public ClassElementNode createMethodClassElement(ClassElementKeyNode key, JavaScriptNode value, boolean isStatic, boolean isPrivate, JavaScriptNode[] decorators) {
+        return ClassElementNode.createMethodClassElement(key, value, isStatic, isPrivate, decorators);
+    }
+
+    public ClassElementNode createAccessorClassElement(ClassElementKeyNode key, JavaScriptNode getter, JavaScriptNode setter, boolean isStatic, boolean isPrivate, JavaScriptNode[] decorators) {
+        return ClassElementNode.createAccessorClassElement(key, getter, setter, isStatic, isPrivate, decorators);
     }
 }
