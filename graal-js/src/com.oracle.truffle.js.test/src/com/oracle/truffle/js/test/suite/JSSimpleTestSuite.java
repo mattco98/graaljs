@@ -47,7 +47,7 @@ import org.junit.runner.RunWith;
 @JSTestSuite(JSSimpleTestSuite.PATH_OF_RESOURCES)
 public class JSSimpleTestSuite {
 
-    public static final String PATH_OF_RESOURCES = "src/com.oracle.truffle.js.test/js";
+    public static final String PATH_OF_RESOURCES = "src/com.oracle.truffle.js.test/js/decorators/add_metadata.js";
 
     public static void main(String[] args) throws Exception {
         JSTestRunner.runInMain(JSSimpleTestSuite.class, args);

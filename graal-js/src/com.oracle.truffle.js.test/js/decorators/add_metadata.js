@@ -11,25 +11,26 @@
  * @option ecmascript-version=2022
  */
 
-load('../assert.js');
+const META_KEY = Symbol();
 
-function defineMetadata(value) {
-    return function(element) {
-        element.elements.push({
-            kind: 'field',
-            placement: 'own',
-            key: 'metadata',
-            initialize: function() {
-                return value;
-            }
-        });
-        return element;
-    }
+function defineMetadata(metadata) {
+    return (value, ctx) => {
+        ctx.setMetadata(META_KEY, metadata);
+    };
+    // return function(element) {
+    //     element.elements.push({
+    //         kind: 'field',
+    //         placement: 'own',
+    //         key: 'metadata',
+    //         initialize: function() {
+    //             return value;
+    //         }
+    //     });
+    //     return element;
+    // }
 }
 
-@defineMetadata({ test: 5})
+@defineMetadata({ test: 5 })
 class C {}
 
-assertSame(5, new C().metadata.test);
-
-true;
+5 === C[Symbol.metadata][META_KEY].constructor.test
